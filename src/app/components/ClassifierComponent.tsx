@@ -1,7 +1,8 @@
-// src/app/components/ClassifierComponent.tsx
-import React, { useState, useRef, ChangeEvent } from 'react';
+"use client";
 
-// 1. Definir tipos para la respuesta de la API (TypeScript al rescate!)
+import React, { useState, useRef, ChangeEvent, DragEvent, useEffect } from 'react';
+import Image from 'next/image';
+
 interface PredictionResult {
   predicted_class: string;
   confidence: number;
@@ -12,144 +13,324 @@ interface PredictionResult {
 }
 
 const ClassifierComponent: React.FC = () => {
-  // 2. Estados de la aplicación
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [prediction, setPrediction] = useState<PredictionResult | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [isDragOver, setIsDragOver] = useState<boolean>(false);
 
-  // 3. Referencia al input de tipo 'file' para resetearlo si es necesario
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dropZoneRef = useRef<HTMLDivElement>(null);
 
-  // 4. Manejador de cambio de archivo
   const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
-    setError(null); // Limpiar errores previos
-    setPrediction(null); // Limpiar predicciones previas
+    setError(null);
+    setPrediction(null);
 
-    const file = event.target.files?.[0]; // Obtener el primer archivo seleccionado
+    const file = event.target.files?.[0];
     if (file) {
-      setSelectedFile(file); // Guardar el archivo en el estado
-      setPreviewUrl(URL.createObjectURL(file)); // Crear URL para previsualizar la imagen
+      setSelectedFile(file);
+      
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = e.target?.result as string;
+        if (result) {
+          setPreviewUrl(result);
+        } else {
+          setError('Error al leer la imagen');
+        }
+      };
+      reader.onerror = () => {
+        setError('Error al leer la imagen');
+      };
+      reader.readAsDataURL(file);
     } else {
       setSelectedFile(null);
       setPreviewUrl(null);
     }
   };
 
-  // 5. Manejador del envío de la imagen a la API
+  const handleDragOver = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(true);
+  };
+
+  const handleDragLeave = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
+  };
+
+  const handleDrop = (e: DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setIsDragOver(false);
+    setError(null);
+    setPrediction(null);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      const file = files[0];
+      if (file.type.startsWith('image/')) {
+        setSelectedFile(file);
+        
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const result = e.target?.result as string;
+          if (result) {
+            setPreviewUrl(result);
+          } else {
+            setError('Error al leer la imagen');
+          }
+        };
+        reader.onerror = () => {
+          setError('Error al leer la imagen');
+        };
+        reader.readAsDataURL(file);
+      } else {
+        setError('Por favor, selecciona solo archivos de imagen.');
+      }
+    }
+  };
+
   const handlePredict = async () => {
     if (!selectedFile) {
       setError('Por favor, selecciona una imagen primero.');
       return;
     }
 
-    setLoading(true); // Indicar que la carga está en progreso
-    setError(null); // Limpiar errores
-    setPrediction(null); // Limpiar predicciones previas
+    setLoading(true);
+    setError(null);
+    setPrediction(null);
 
     const formData = new FormData();
-    formData.append('image', selectedFile); // 'image' debe coincidir con el nombre del campo esperado por tu API
+    formData.append('image', selectedFile);
 
     try {
       const response = await fetch('https://petclassifier.zeabur.app/api/predict/', {
         method: 'POST',
         body: formData,
-        // No necesitas 'Content-Type': 'multipart/form-data' aquí,
-        // el navegador lo establece automáticamente con FormData.
       });
 
       if (!response.ok) {
-        // Manejar errores de respuesta HTTP (ej. 404, 500)
-        const errorData = await response.json(); // Intentar leer el mensaje de error del backend
+        const errorData = await response.json();
         throw new Error(errorData.detail || `Error HTTP: ${response.status} ${response.statusText}`);
       }
 
-      const data: PredictionResult = await response.json(); // Parsear la respuesta JSON
-      setPrediction(data); // Almacenar el resultado de la predicción
-    } catch (err: any) {
-      console.error('Error al clasificar la imagen:', err);
-      setError(`Error al clasificar la imagen: ${err.message || 'Error desconocido'}`);
+      const data: PredictionResult = await response.json();
+      setPrediction(data);
+    } catch (err: unknown) {
+      setError(`Error al clasificar la imagen: ${err instanceof Error ? err.message : 'Error desconocido'}`);
     } finally {
-      setLoading(false); // Finalizar el estado de carga
-      // Opcional: Resetear el input de archivo después de la predicción
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
-      setSelectedFile(null);
-      setPreviewUrl(null);
+      setLoading(false);
     }
   };
 
-  // 6. Renderizado del componente
+  const getAnimalIcon = (animal: string) => {
+    return animal === 'cat' ? '🐱' : '🐕';
+  };
+
+  const getConfidenceColor = (confidence: number) => {
+    if (confidence >= 0.8) return 'text-green-600';
+    if (confidence >= 0.6) return 'text-yellow-600';
+    return 'text-red-600';
+  };
+
   return (
-    <div>
-      {/* Input de archivo */}
-      <input
-        type="file"
-        accept="image/*"
-        ref={fileInputRef} // Asignar la referencia
-        onChange={handleFileChange} // Manejar cambio de archivo
-        className="block w-full text-sm text-gray-500
-                   file:mr-4 file:py-2 file:px-4
-                   file:rounded-full file:border-0
-                   file:text-sm file:font-semibold
-                   file:bg-violet-50 file:text-violet-700
-                   hover:file:bg-violet-100"
-      />
+    <div className="max-w-2xl mx-auto p-8 bg-white/80 backdrop-blur-sm rounded-3xl shadow-2xl border border-white/20">
+      <div className="text-center mb-8">
+        <h1 className="text-6xl font-black bg-gradient-to-r from-purple-600 via-pink-600 to-orange-500 bg-clip-text text-transparent mb-4 tracking-tight">
+          🐾 Pet Classifier
+        </h1>
+        <p className="text-gray-700 text-xl font-medium">
+          Sube una imagen de tu mascota y descubre si es un gato o un perro
+        </p>
+      </div>
 
-      {/* Previsualización de la imagen */}
-      {previewUrl && (
-        <div className="mt-4 flex justify-center">
-          <img
-            src={previewUrl}
-            alt="Vista previa de la imagen seleccionada"
-            className="max-w-xs max-h-60 rounded-lg shadow-md border border-gray-200 object-contain"
-          />
-        </div>
-      )}
-
-      {/* Botón de Clasificar */}
-      <button
-        onClick={handlePredict}
-        disabled={!selectedFile || loading} // Deshabilitar si no hay archivo o está cargando
-        className={`mt-6 w-full font-bold py-2 px-4 rounded transition-colors duration-200
-                   ${!selectedFile || loading
-                      ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
-                      : 'bg-blue-600 hover:bg-blue-700 text-white'
-                   }`}
+      <div
+        ref={dropZoneRef}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onDrop={handleDrop}
+        className={`
+          relative border-2 border-dashed rounded-xl p-8 text-center transition-all duration-300
+          ${isDragOver 
+            ? 'border-purple-500 bg-purple-50 scale-105' 
+            : 'border-gray-300 hover:border-purple-400 hover:bg-gray-50'
+          }
+        `}
       >
-        {loading ? 'Clasificando...' : 'Clasificar Imagen'}
-      </button>
+        <div className="space-y-4">
+          <div className="text-6xl mb-4">📸</div>
+          <h3 className="text-xl font-semibold text-gray-700">
+            {isDragOver ? '¡Suelta la imagen aquí!' : 'Arrastra y suelta tu imagen aquí'}
+          </h3>
+          <p className="text-gray-500">o</p>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className="inline-flex items-center px-6 py-3 bg-gradient-to-r from-purple-600 to-pink-600 text-white font-semibold rounded-lg hover:from-purple-700 hover:to-pink-700 transition-all duration-200 transform hover:scale-105 shadow-lg"
+          >
+            <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+            </svg>
+            Seleccionar Imagen
+          </button>
+          <p className="text-sm text-gray-400">Soporta JPG, PNG, GIF hasta 10MB</p>
+        </div>
+        
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          onChange={handleFileChange}
+          className="hidden"
+        />
+      </div>
 
-      {/* Área de Mensajes de Error */}
-      {error && (
-        <div className="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded-md text-center">
-          {error}
+      <div className="mt-6 flex justify-center">
+        {previewUrl ? (
+          <div className="relative group">
+            <Image
+              src={previewUrl}
+              alt="Vista previa"
+              width={320}
+              height={320}
+              className="max-w-sm max-h-80 rounded-xl shadow-2xl object-cover border-4 border-white"
+              onError={() => setError('Error al cargar la imagen')}
+              unoptimized
+            />
+            <button
+              onClick={() => {
+                setSelectedFile(null);
+                setPreviewUrl(null);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+              }}
+              className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 bg-red-500 text-white p-2 rounded-full transition-all duration-300 hover:bg-red-600 z-10"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        ) : (
+          <div className="w-80 h-60 bg-gradient-to-br from-gray-100 to-gray-200 rounded-xl border-2 border-dashed border-gray-300 flex items-center justify-center">
+            <div className="text-center text-gray-500">
+              <div className="text-4xl mb-2">📷</div>
+              <p className="text-sm">Vista previa de la imagen</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {selectedFile && (
+        <div className="mt-6 flex justify-center space-x-4">
+          <button
+            onClick={handlePredict}
+            disabled={loading}
+            className={`
+              relative px-8 py-4 rounded-xl font-bold text-lg transition-all duration-300 transform hover:scale-105 shadow-lg
+              ${loading
+                ? 'bg-gray-400 text-gray-700 cursor-not-allowed'
+                : 'bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white'
+              }
+            `}
+          >
+            {loading ? (
+              <div className="flex items-center">
+                <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white mr-3"></div>
+                Analizando imagen...
+              </div>
+            ) : (
+              <div className="flex items-center">
+                <svg className="w-5 h-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+                </svg>
+                Clasificar Mascota
+              </div>
+            )}
+          </button>
+          
+          <button
+            onClick={() => {
+              setSelectedFile(null);
+              setPreviewUrl(null);
+              if (fileInputRef.current) fileInputRef.current.value = '';
+            }}
+            className="px-6 py-4 bg-gradient-to-r from-gray-500 to-gray-600 text-white font-bold rounded-xl hover:from-gray-600 hover:to-gray-700 transition-all duration-300 transform hover:scale-105 shadow-lg"
+          >
+            Cambiar Imagen
+          </button>
         </div>
       )}
 
-      {/* Área de Resultados de Predicción */}
-      {prediction && (
-        <div className="mt-6 text-center p-4 bg-green-50 border border-green-200 rounded-lg">
-          <p className="text-xl font-bold text-green-700 mb-2">
-            Predicción: <span className="capitalize">{prediction.predicted_class}</span>
-          </p>
-          <p className="text-lg text-gray-800">
-            Confianza: <span className="font-semibold">{(prediction.confidence * 100).toFixed(2)}%</span>
-          </p>
-          <div className="mt-3 grid grid-cols-2 gap-2 text-sm text-gray-600">
-            <p>Gato: {(prediction.probabilities.cat * 100).toFixed(2)}%</p>
-            <p>Perro: {(prediction.probabilities.dog * 100).toFixed(2)}%</p>
+      {error && (
+        <div className="mt-6 p-4 bg-red-50 border border-red-200 rounded-xl text-center animate-pulse">
+          <div className="flex items-center justify-center">
+            <svg className="w-6 h-6 text-red-500 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <span className="text-red-700 font-medium">{error}</span>
           </div>
         </div>
       )}
 
-      {/* Mensaje inicial si no hay resultados ni carga */}
+      {prediction && (
+        <div className="mt-8 p-6 bg-gradient-to-br from-green-50 to-blue-50 border border-green-200 rounded-2xl shadow-xl">
+          <div className="text-center">
+            <div className="text-6xl mb-4">{getAnimalIcon(prediction.predicted_class)}</div>
+            <h3 className="text-2xl font-bold text-gray-800 mb-2">
+              ¡Es un {prediction.predicted_class === 'cat' ? 'Gato' : 'Perro'}!
+            </h3>
+            <p className={`text-xl font-semibold mb-6 ${getConfidenceColor(prediction.confidence)}`}>
+              Confianza: {(prediction.confidence * 100).toFixed(1)}%
+            </p>
+            
+            <div className="space-y-4">
+              <div>
+                <div className="flex justify-between text-sm font-medium text-gray-700 mb-1">
+                  <span>🐱 Gato</span>
+                  <span>{(prediction.probabilities.cat * 100).toFixed(1)}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-3">
+                  <div 
+                    className="bg-gradient-to-r from-orange-400 to-orange-600 h-3 rounded-full transition-all duration-1000"
+                    style={{ width: `${prediction.probabilities.cat * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+              
+              <div>
+                <div className="flex justify-between text-sm font-medium text-gray-700 mb-1">
+                  <span>🐕 Perro</span>
+                  <span>{(prediction.probabilities.dog * 100).toFixed(1)}%</span>
+                </div>
+                <div className="w-full bg-gray-200 rounded-full h-3">
+                  <div 
+                    className="bg-gradient-to-r from-blue-400 to-blue-600 h-3 rounded-full transition-all duration-1000"
+                    style={{ width: `${prediction.probabilities.dog * 100}%` }}
+                  ></div>
+                </div>
+              </div>
+            </div>
+            
+            <button
+              onClick={() => {
+                setSelectedFile(null);
+                setPreviewUrl(null);
+                setPrediction(null);
+                if (fileInputRef.current) fileInputRef.current.value = '';
+              }}
+              className="mt-6 px-6 py-2 bg-gradient-to-r from-gray-500 to-gray-600 text-white font-medium rounded-lg hover:from-gray-600 hover:to-gray-700 transition-all duration-200"
+            >
+              Probar otra imagen
+            </button>
+          </div>
+        </div>
+      )}
+
       {!selectedFile && !prediction && !loading && !error && (
-        <div className="mt-6 text-center text-gray-600">
-            <p className="text-lg font-semibold text-gray-700">Resultado:</p>
-            <p className="text-xl text-blue-600">Selecciona una imagen para empezar</p>
+        <div className="mt-8 text-center">
+          <div className="text-6xl mb-4">🤔</div>
+          <h3 className="text-xl font-semibold text-gray-700 mb-2">¿Qué mascota tienes?</h3>
+          <p className="text-gray-500">Sube una foto y te diremos si es un gato o un perro</p>
         </div>
       )}
     </div>
